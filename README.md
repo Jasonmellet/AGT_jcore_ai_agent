@@ -16,6 +16,7 @@ Local-first, profile-isolated runtime scaffold for the Family Agent Operating Sy
   - `/health`
   - `/status`
   - `/api-usage` (LLM token usage when enabled)
+  - `/backup/status` (latest code/data backup log status)
   - `/logs`
 - Tool execution: `POST /tools/execute` with `{"tool_name": "...", "payload": {...}}`; Tier 0 (e.g. `math`, `get_time`, `runtime_diagnostics`, `sandbox_list`, `sandbox_read_text`) runs directly; Tier 1/Tier2 queue for approval. `GET /approvals` lists queue state; `POST /approvals/<id>/resolve` approves/rejects; `POST /approvals/<id>/execute` executes approved requests once (idempotent).
 - Fleet + interop control: `GET /fleet/status`, `POST /fleet/deploy`, `GET /interop/messages`, `POST /interop/inbox`.

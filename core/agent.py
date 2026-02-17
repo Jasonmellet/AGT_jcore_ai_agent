@@ -9,6 +9,7 @@ from pathlib import Path
 
 from core.api_usage import ApiUsageStore
 from core.approval.engine import ApprovalEngine
+from core.backup_status import BackupStatusProvider
 from core.control_plane import ControlPlane
 from core.health.server import HealthServer
 from core.interop.bridge import InteropBridge
@@ -64,6 +65,7 @@ def main() -> int:
         profile_name=profile.name,
     )
     api_usage_store = ApiUsageStore()
+    backup_status = BackupStatusProvider(profile.paths.base_data_dir)
     control_plane = ControlPlane(runtime_repo_root)
     interop_bridge = InteropBridge(
         conn=conn,
@@ -107,6 +109,7 @@ def main() -> int:
         approval_engine=approval_engine,
         episodic_memory=episodic_memory,
         api_usage_provider=lambda: {**api_usage_store.summary(), "profile": profile.name},
+        backup_status_provider=backup_status.summary,
         control_plane=control_plane,
         interop_bridge=interop_bridge,
     )

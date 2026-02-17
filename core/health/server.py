@@ -26,6 +26,7 @@ class HealthServer:
         approval_engine: ApprovalEngine,
         episodic_memory: EpisodicMemoryStore,
         api_usage_provider: Callable[[], dict[str, Any]] | None = None,
+        backup_status_provider: Callable[[], dict[str, Any]] | None = None,
         control_plane: ControlPlane | None = None,
         interop_bridge: InteropBridge | None = None,
     ) -> None:
@@ -36,6 +37,7 @@ class HealthServer:
         self._approval_engine = approval_engine
         self._episodic_memory = episodic_memory
         self._api_usage_provider = api_usage_provider or (lambda: {"enabled": False})
+        self._backup_status_provider = backup_status_provider or (lambda: {"status": "unavailable"})
         self._control_plane = control_plane
         self._interop_bridge = interop_bridge
         self._started_at = time.time()
@@ -63,6 +65,7 @@ class HealthServer:
         approval_engine = self._approval_engine
         episodic_memory = self._episodic_memory
         api_usage_provider = self._api_usage_provider
+        backup_status_provider = self._backup_status_provider
         control_plane = self._control_plane
         interop_bridge = self._interop_bridge
         started_at = self._started_at
@@ -105,6 +108,9 @@ class HealthServer:
 
                 if self.path == "/api-usage":
                     self._write_json(200, api_usage_provider())
+                    return
+                if self.path == "/backup/status":
+                    self._write_json(200, backup_status_provider())
                     return
                 if self.path == "/fleet/status":
                     if control_plane is None:
