@@ -1,0 +1,7 @@
+name: jennifer
+display_name: Jennifer Node
+policy_tier: standard
+allowed_tool_tiers:
+  - tier0
+  - tier1
+health_port: 8600

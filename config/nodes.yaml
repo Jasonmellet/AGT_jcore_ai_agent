@@ -1,0 +1,13 @@
+nodes:
+  jason:
+    host: 192.168.7.10
+    profile: jason
+  jennifer:
+    host: 192.168.1.TBD
+    profile: jennifer
+  kiera:
+    host: 192.168.1.TBD
+    profile: kiera
+  scarlet:
+    host: 192.168.1.TBD
+    profile: scarlet

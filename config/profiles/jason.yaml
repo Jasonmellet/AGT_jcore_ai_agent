@@ -1,0 +1,8 @@
+name: jason
+display_name: Jason Core
+policy_tier: core
+allowed_tool_tiers:
+  - tier0
+  - tier1
+  - tier2
+health_port: 8600
