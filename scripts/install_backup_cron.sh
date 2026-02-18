@@ -33,5 +33,9 @@ awk -v begin="$MARK_BEGIN" -v end="$MARK_END" '
   echo "$MARK_END"
 } >>"$TMP_NEW"
 
-crontab "$TMP_NEW"
-echo "Installed backup cron jobs for profile: $PROFILE"
+if crontab "$TMP_NEW"; then
+  echo "Installed backup cron jobs for profile: $PROFILE"
+else
+  echo "WARNING: Unable to install cron jobs for profile: $PROFILE (permission denied)."
+  echo "Run this script from an interactive Terminal session on the Mini after granting Terminal Full Disk Access."
+fi

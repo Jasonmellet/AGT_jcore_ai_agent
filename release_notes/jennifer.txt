@@ -1,0 +1,9 @@
+Latest update – your assistant has new capabilities:
+
+• Conversational replies: You can chat in plain language and get full answers (OpenAI on this node).
+• Every message is stored: Inbound and outbound text is saved for memory and search.
+• Idea engine: Use /idea <text> to save an idea, /ideas to list recent ideas, /idea_search <query> to find ideas by meaning. You can also type #ideaengine in any message to capture it as an idea.
+• Semantic memory: Your messages and ideas are embedded so you can search and recall by meaning, not just keywords.
+• API usage tracking: Token usage is recorded and available at /api-usage (dashboard-ready).
+
+You can ask me "what's new?", "what can you do?", or "how do I save an idea?" anytime.

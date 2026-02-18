@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODES_FILE="$REPO_ROOT/config/nodes.yaml"
 DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy.sh"
 LOCAL_SECRETS_DIR="$REPO_ROOT/secrets"
+[[ -f "$REPO_ROOT/.env" ]] && set -a && source "$REPO_ROOT/.env" && set +a
 
 if [[ ! -f "$NODES_FILE" ]]; then
   echo "Missing nodes file: $NODES_FILE"
@@ -24,14 +25,21 @@ while IFS='|' read -r profile host user_name; do
   token_file="$LOCAL_SECRETS_DIR/$profile.telegram.token"
   pairing_file="$LOCAL_SECRETS_DIR/$profile.telegram.pairing_code"
   llm_key_file="$LOCAL_SECRETS_DIR/$profile.llm_api_key"
+  openai_key_file="$LOCAL_SECRETS_DIR/$profile.openai_api_key"
+  profile_upper="$(echo "$profile" | tr '[:lower:]' '[:upper:]')"
+  token_var="${profile_upper}_TELEGRAM_TOKEN"
+  pairing_var="${profile_upper}_TELEGRAM_PAIRING_CODE"
+  llm_var="${profile_upper}_OPENAI_API_KEY"
 
-  token_value=""
-  pairing_value=""
-  llm_key_value=""
-
-  [[ -f "$token_file" ]] && token_value="$(tr -d '\r\n' < "$token_file")"
-  [[ -f "$pairing_file" ]] && pairing_value="$(tr -d '\r\n' < "$pairing_file")"
-  [[ -f "$llm_key_file" ]] && llm_key_value="$(tr -d '\r\n' < "$llm_key_file")"
+  token_value="${!token_var:-}"
+  pairing_value="${!pairing_var:-}"
+  llm_key_value="${!llm_var:-}"
+  [[ -z "$token_value" && -f "$token_file" ]] && token_value="$(tr -d '\r\n' < "$token_file")"
+  [[ -z "$pairing_value" && -f "$pairing_file" ]] && pairing_value="$(tr -d '\r\n' < "$pairing_file")"
+  if [[ -z "$llm_key_value" ]]; then
+    [[ -f "$llm_key_file" ]] && llm_key_value="$(tr -d '\r\n' < "$llm_key_file")"
+    [[ -z "$llm_key_value" && -f "$openai_key_file" ]] && llm_key_value="$(tr -d '\r\n' < "$openai_key_file")"
+  fi
 
   if "$DEPLOY_SCRIPT" "$profile" "$host" "$user_name" "$token_value" "$pairing_value" "$llm_key_value"; then
     echo "SUCCESS: $profile@$host"

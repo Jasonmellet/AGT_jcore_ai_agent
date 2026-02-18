@@ -5,3 +5,10 @@ allowed_tool_tiers:
   - tier0
   - tier1
 health_port: 8600
+llm_default_model: gpt-4o-mini
+public_readonly_mode: false
+public_readonly_get_endpoints:
+  - /health
+  - /status
+  - /api-usage
+  - /backup/status

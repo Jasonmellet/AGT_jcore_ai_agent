@@ -113,6 +113,34 @@ class InteropBridge:
         )
         self._conn.commit()
 
+    def _payload_for_log(self, payload: dict[str, Any], response_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        out = dict(payload)
+        if isinstance(response_payload, dict):
+            reply = response_payload.get("reply")
+            if isinstance(reply, dict):
+                reply_copy = dict(reply)
+                msg = reply_copy.get("message")
+                if isinstance(msg, str) and len(msg) > 600:
+                    reply_copy["message"] = msg[:597] + "..."
+                out["reply"] = reply_copy
+        return out
+
+    def _last_outbox_timestamp(self, target: str, task_type: str) -> int | None:
+        row = self._conn.execute(
+            """
+            SELECT CAST(strftime('%s', created_at) AS INTEGER) AS ts
+            FROM interop_messages
+            WHERE direction = 'outbox' AND target_node = ? AND task_type = ? AND status = 'sent'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (target, task_type),
+        ).fetchone()
+        if row is None:
+            return None
+        value = row["ts"]
+        return int(value) if value is not None else None
+
     def build_envelope(self, target: str, task_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         envelope = {
             "source": self._profile_name,
@@ -143,12 +171,13 @@ class InteropBridge:
         try:
             with request.urlopen(req, timeout=10) as resp:  # noqa: S310
                 response_payload = json.loads(resp.read().decode("utf-8"))
+            payload_for_log = self._payload_for_log(payload, response_payload if isinstance(response_payload, dict) else None)
             self._record_message(
                 direction="outbox",
                 source=self._profile_name,
                 target=target_profile,
                 task_type=task_type,
-                payload=payload,
+                payload=payload_for_log,
                 nonce=envelope["nonce"],
                 status="sent",
             )
@@ -164,6 +193,29 @@ class InteropBridge:
                 status=f"failed:{exc}",
             )
             raise RuntimeError(f"Failed to send interop message: {exc}") from exc
+
+    def send_daily_skills_checkins(self, *, interval_seconds: int = 86400) -> list[dict[str, Any]]:
+        """
+        Send at-most-once-per-interval lightweight skills check-ins to configured targets.
+        Uses existing interop_messages table for scheduling state.
+        """
+        now = int(time.time())
+        results: list[dict[str, Any]] = []
+        for target_profile in self._configured_targets().keys():
+            last_sent = self._last_outbox_timestamp(target_profile, "skills_checkin")
+            if last_sent is not None and (now - last_sent) < interval_seconds:
+                continue
+            payload = {
+                "kind": "daily_skills_checkin",
+                "question": "Hey, do you have any cool new skills today?",
+                "requested_at": now,
+            }
+            try:
+                result = self.send_task(target_profile, "skills_checkin", payload)
+                results.append({"target": target_profile, "ok": True, "result": result})
+            except RuntimeError as exc:
+                results.append({"target": target_profile, "ok": False, "error": str(exc)})
+        return results
 
     def receive_envelope(self, envelope: dict[str, Any]) -> dict[str, Any]:
         required = {"source", "target", "task_type", "payload", "nonce", "timestamp", "signature"}
@@ -200,6 +252,7 @@ class InteropBridge:
             "source": envelope["source"],
             "target": envelope["target"],
             "task_type": envelope["task_type"],
+            "payload": dict(envelope["payload"]),
             "nonce": nonce,
         }
 

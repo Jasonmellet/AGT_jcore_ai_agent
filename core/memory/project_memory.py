@@ -67,3 +67,52 @@ class ProjectMemoryStore:
             """
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def latest(self, *, limit: int = 20, status: str | None = None) -> list[dict[str, Any]]:
+        if status:
+            rows = self._conn.execute(
+                """
+                SELECT id, title, body, status, created_at, updated_at
+                FROM project_memory
+                WHERE status = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT id, title, body, status, created_at, updated_at
+                FROM project_memory
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get(self, project_id: int) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            """
+            SELECT id, title, body, status, created_at, updated_at
+            FROM project_memory
+            WHERE id = ?
+            """,
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def search_like(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        term = f"%{query.strip()}%"
+        rows = self._conn.execute(
+            """
+            SELECT id, title, body, status, created_at, updated_at
+            FROM project_memory
+            WHERE title LIKE ? OR body LIKE ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (term, term, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]

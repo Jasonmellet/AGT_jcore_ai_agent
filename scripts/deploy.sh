@@ -23,11 +23,24 @@ GITHUB_REPO_BRANCH_VALUE="${8:-${GITHUB_REPO_BRANCH:-main}}"
 TARGET="$USER_NAME@$HOST"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Prefer deploy key for automation; fall back to default SSH identities if needed.
+BASE_SSH_OPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new)
+SSH_OPTS=("${BASE_SSH_OPTS[@]}")
+RSYNC_SSH="ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
+DEPLOY_KEY="$REPO_ROOT/secrets/deploy_key"
+if [[ -f "$DEPLOY_KEY" ]]; then
+  KEY_SSH_OPTS=("${BASE_SSH_OPTS[@]}" -i "$DEPLOY_KEY" -o IdentitiesOnly=yes)
+  if ssh "${KEY_SSH_OPTS[@]}" "$TARGET" "echo 'ssh_ok'" >/dev/null 2>&1; then
+    SSH_OPTS=("${KEY_SSH_OPTS[@]}")
+    RSYNC_SSH+=" -i \"$DEPLOY_KEY\" -o IdentitiesOnly=yes"
+    echo "Using deploy key for $TARGET"
+  fi
+fi
+
 echo "Deploying profile '$PROFILE' to $TARGET..."
-SSH_OPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new)
 ssh "${SSH_OPTS[@]}" "$TARGET" "echo 'ssh_ok'" >/dev/null
 ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p \"\$HOME/agentbase\""
-rsync -az --delete -e "ssh ${SSH_OPTS[*]}" \
+rsync -az --delete -e "$RSYNC_SSH" \
   --exclude ".git/" \
   --exclude ".venv/" \
   --exclude "__pycache__/" \
@@ -49,8 +62,17 @@ if [[ -n "$LLM_API_KEY_VALUE" ]]; then
   ssh "${SSH_OPTS[@]}" "$TARGET" "umask 077 && cat > ~/agentdata/$PROFILE/secrets/llm_api_key.txt && chmod 600 ~/agentdata/$PROFILE/secrets/llm_api_key.txt" <<<"$LLM_API_KEY_VALUE"
 fi
 
+if [[ -f "$REPO_ROOT/secrets/interop_shared_key.txt" ]]; then
+  ssh "${SSH_OPTS[@]}" "$TARGET" "umask 077 && cat > ~/agentdata/$PROFILE/secrets/interop_shared_key.txt && chmod 600 ~/agentdata/$PROFILE/secrets/interop_shared_key.txt" < "$REPO_ROOT/secrets/interop_shared_key.txt"
+fi
+
 if [[ -n "$GITHUB_REPO_URL_VALUE" ]]; then
   ssh "${SSH_OPTS[@]}" "$TARGET" "~/agentbase/scripts/setup_github_backup.sh \"$PROFILE\" \"$GITHUB_REPO_URL_VALUE\" \"$GITHUB_REPO_BRANCH_VALUE\""
+fi
+
+if [[ -f "$REPO_ROOT/release_notes/$PROFILE.txt" ]]; then
+  ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p ~/agentdata/$PROFILE"
+  rsync -az -e "$RSYNC_SSH" "$REPO_ROOT/release_notes/$PROFILE.txt" "$TARGET:~/agentdata/$PROFILE/release_notes_latest.txt"
 fi
 
 ssh "${SSH_OPTS[@]}" "$TARGET" "~/agentbase/scripts/stop_agent.sh \"$PROFILE\" || true"

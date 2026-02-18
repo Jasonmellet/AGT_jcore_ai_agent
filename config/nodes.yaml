@@ -2,12 +2,20 @@ nodes:
   jason:
     host: 192.168.7.10
     profile: jason
+    user: jcore
   jennifer:
-    host: 192.168.1.TBD
+    host: 192.168.7.198
     profile: jennifer
+    user: jencore
   kiera:
-    host: 192.168.1.TBD
+    host: 192.168.4.140
     profile: kiera
+    user: kieracore
   scarlet:
-    host: 192.168.1.TBD
+    host: 192.168.7.191
     profile: scarlet
+    user: scarletcore
+  pepper:
+    host: peppers-mac-mini.local
+    profile: pepper
+    user: pepperpotts

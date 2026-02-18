@@ -52,6 +52,49 @@ class MemoryEngine:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS telegram_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                direction TEXT NOT NULL,
+                message_type TEXT NOT NULL DEFAULT 'text',
+                source TEXT NOT NULL DEFAULT 'telegram',
+                text TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat_id_id
+            ON telegram_messages(chat_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS message_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_kind TEXT NOT NULL,
+                source_id INTEGER NOT NULL,
+                source_ref TEXT,
+                chunk_index INTEGER NOT NULL DEFAULT 0,
+                text_chunk TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                embedding_model TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_message_embeddings_source
+            ON message_embeddings(source_kind, source_id);
+
+            CREATE TABLE IF NOT EXISTS api_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_name TEXT NOT NULL,
+                caller TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_api_usage_profile_created
+            ON api_usage(profile_name, created_at DESC);
+
             CREATE TABLE IF NOT EXISTS approval_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 profile_name TEXT NOT NULL,

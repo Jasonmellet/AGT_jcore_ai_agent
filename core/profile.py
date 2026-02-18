@@ -25,6 +25,9 @@ class Profile:
     policy_tier: str
     allowed_tool_tiers: list[str]
     health_port: int
+    llm_default_model: str
+    public_readonly_mode: bool
+    public_readonly_get_endpoints: list[str]
     paths: ProfilePaths
 
 
@@ -80,6 +83,14 @@ def load_profile(profile_name: str, repo_root: Path | None = None) -> Profile:
         policy_tier=raw["policy_tier"],
         allowed_tool_tiers=list(raw["allowed_tool_tiers"]),
         health_port=int(raw.get("health_port", 8600)),
+        llm_default_model=str(raw.get("llm_default_model", "gpt-4o-mini")).strip() or "gpt-4o-mini",
+        public_readonly_mode=bool(raw.get("public_readonly_mode", False)),
+        public_readonly_get_endpoints=list(
+            raw.get(
+                "public_readonly_get_endpoints",
+                ["/health", "/status", "/api-usage", "/backup/status"],
+            )
+        ),
         paths=paths,
     )
 

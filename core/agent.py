@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import signal
+import threading
 import time
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from core.tools.sandbox_list_tool import SandboxListTool
 from core.tools.sandbox_read_text_tool import SandboxReadTextTool
 from core.tools.registry import ToolRegistry
 from core.tools.request_email_tool import RequestEmailTool
+from core.tools.idea_search_tool import IdeaSearchTool
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,7 +66,7 @@ def main() -> int:
         episodic_memory=episodic_memory,
         profile_name=profile.name,
     )
-    api_usage_store = ApiUsageStore()
+    api_usage_store = ApiUsageStore(conn)
     backup_status = BackupStatusProvider(profile.paths.base_data_dir)
     control_plane = ControlPlane(runtime_repo_root)
     interop_bridge = InteropBridge(
@@ -85,6 +87,7 @@ def main() -> int:
         SandboxReadTextTool(sandbox),
         RequestEmailTool(),
         DelegateNodeTaskTool(interop_bridge),
+        IdeaSearchTool(db_path=profile.paths.db_path, secrets_dir=profile.paths.secrets_dir),
     ):
         tool_registry.register(tool)
 
@@ -108,12 +111,48 @@ def main() -> int:
         tool_registry=tool_registry,
         approval_engine=approval_engine,
         episodic_memory=episodic_memory,
-        api_usage_provider=lambda: {**api_usage_store.summary(), "profile": profile.name},
+        api_usage_provider=lambda window_days=None: {**api_usage_store.summary(window_days=window_days), "profile": profile.name},
         backup_status_provider=backup_status.summary,
         control_plane=control_plane,
         interop_bridge=interop_bridge,
+        public_readonly_mode=profile.public_readonly_mode,
+        public_readonly_get_endpoints=profile.public_readonly_get_endpoints,
     )
     health_server.start()
+    running = True
+    checkin_thread: threading.Thread | None = None
+
+    def _daily_skills_checkin_loop() -> None:
+        # At-most-daily interop check-ins; wakes hourly.
+        while running:
+            try:
+                results = interop_bridge.send_daily_skills_checkins(interval_seconds=86400)
+                for item in results:
+                    episodic_memory.record(
+                        "interop_skills_checkin_sent",
+                        item,
+                        decision="allow" if item.get("ok") else "deny",
+                    )
+            except RuntimeError as exc:
+                episodic_memory.record(
+                    "interop_skills_checkin_error",
+                    {"error": str(exc)},
+                    decision="deny",
+                )
+            for _ in range(3600):
+                if not running:
+                    break
+                time.sleep(1)
+
+    def handle_shutdown(*_: object) -> None:
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    checkin_thread = threading.Thread(target=_daily_skills_checkin_loop, daemon=True)
+    checkin_thread.start()
+
     telegram_bot = TelegramBot(
         profile=profile,
         episodic_memory=episodic_memory,
@@ -123,21 +162,14 @@ def main() -> int:
     telegram_enabled = telegram_bot.start()
     profile_memory.set_fact("telegram_enabled", "true" if telegram_enabled else "false")
 
-    running = True
-
-    def handle_shutdown(*_: object) -> None:
-        nonlocal running
-        running = False
-
-    signal.signal(signal.SIGINT, handle_shutdown)
-    signal.signal(signal.SIGTERM, handle_shutdown)
-
     try:
         while running and not telegram_enabled:
             time.sleep(1)
     finally:
         episodic_memory.record("agent_shutdown", {"profile": profile.name}, decision="allow")
         telegram_bot.stop()
+        if checkin_thread is not None:
+            checkin_thread.join(timeout=2)
         health_server.stop()
         memory_engine.close()
 
