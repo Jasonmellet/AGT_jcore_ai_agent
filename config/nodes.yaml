@@ -1,3 +1,7 @@
+routing:
+  hub_node_id: jason
+  hub_profile: jason
+
 nodes:
   jason:
     host: 192.168.7.10

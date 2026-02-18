@@ -5,6 +5,7 @@ allowed_tool_tiers:
   - tier0
   - tier1
 health_port: 8600
+interop_identity_mode: compat
 llm_default_model: gpt-4o-mini
 public_readonly_mode: false
 public_readonly_get_endpoints:

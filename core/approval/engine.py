@@ -114,3 +114,17 @@ class ApprovalEngine:
         )
         self._conn.commit()
         return cursor.rowcount > 0
+
+    def count_recent_approved(self, *, tool_name: str, within_seconds: int = 86400) -> int:
+        row = self._conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM approval_queue
+            WHERE tool_name = ?
+              AND status = 'approved'
+              AND reviewed_at IS NOT NULL
+              AND reviewed_at >= datetime('now', ?)
+            """,
+            (tool_name, f"-{int(within_seconds)} seconds"),
+        ).fetchone()
+        return int(row["c"]) if row and row["c"] is not None else 0

@@ -5,3 +5,4 @@ allowed_tool_tiers:
   - tier0
   - tier1
 health_port: 8600
+interop_identity_mode: compat

@@ -20,6 +20,7 @@ class DelegateNodeTaskTool(BaseTool):
         target = str(payload.get("target_profile", "")).strip()
         task_type = str(payload.get("task_type", "")).strip()
         task_payload = payload.get("task_payload")
+        route_via = str(payload.get("route_via", "auto")).strip() or "auto"
         if not target:
             return ToolExecutionResult(ok=False, output={"error": "Missing target_profile"})
         if not task_type:
@@ -27,7 +28,7 @@ class DelegateNodeTaskTool(BaseTool):
         if not isinstance(task_payload, dict):
             return ToolExecutionResult(ok=False, output={"error": "task_payload must be an object"})
         try:
-            result = self._bridge.send_task(target, task_type, task_payload)
+            result = self._bridge.send_task(target, task_type, task_payload, route_via=route_via)
             return ToolExecutionResult(ok=True, output=result)
         except RuntimeError as exc:
             return ToolExecutionResult(ok=False, output={"error": str(exc)})

@@ -20,6 +20,8 @@ Local-first, profile-isolated runtime scaffold for the Family Agent Operating Sy
   - `/logs`
 - Tool execution: `POST /tools/execute` with `{"tool_name": "...", "payload": {...}}`; Tier 0 (e.g. `math`, `get_time`, `runtime_diagnostics`, `sandbox_list`, `sandbox_read_text`) runs directly; Tier 1/Tier2 queue for approval. `GET /approvals` lists queue state; `POST /approvals/<id>/resolve` approves/rejects; `POST /approvals/<id>/execute` executes approved requests once (idempotent).
 - Fleet + interop control: `GET /fleet/status`, `POST /fleet/deploy`, `GET /interop/messages`, `POST /interop/inbox`.
+- Hub-routed interop: `route_envelope` enables reliable relay through jcore when direct node-to-node routing fails.
+- Skill economy primitives: skill manifests (`~/agent_skills/manifest.yaml`), governed skill transfer tasks (`skill_request`, `skill_approve`, `skill_deliver`, `skill_install_result`), checksum-verified bundle installs.
 - Deploy scripts for single-node and multi-node rollout: `scripts/`
 
 ## Prerequisites
@@ -319,11 +321,13 @@ After this lock, move to `jencore` onboarding.
 3. **GitHub (optional):** Create a repo for jencore backups; you’ll add jencore’s SSH deploy key after first deploy or during `setup_github_backup.sh`.
 4. **This repo:** Set jennifer’s host in `config/nodes.yaml` to jencore’s IP (replace `192.168.1.TBD`).
 5. **Deploy from MacBook (this repo):**
-   ```bash
-   ./scripts/deploy.sh jennifer <jencore_ip> <jencore_user> \
-     "<TELEGRAM_TOKEN>" "<PAIRING_CODE>" \
-     "<LLM_API_KEY>" "git@github.com:USER/AGT_jencore_ai_agent.git" main
-   ```
+
+```bash
+./scripts/deploy.sh jennifer <jencore_ip> <jencore_user> \
+  "<TELEGRAM_TOKEN>" "<PAIRING_CODE>" \
+  "<LLM_API_KEY>" "git@github.com:USER/AGT_jencore_ai_agent.git" main
+```
+
    Omit optional args if not ready; you can add Telegram/LLM/GitHub later and re-run deploy or run bootstrap/setup scripts on jencore.
 6. **On jencore (if using GitHub backup):** After first deploy, generate SSH key on jencore, add the public key to the jencore backup repo, then run `~/agentbase/scripts/setup_github_backup.sh jennifer <repo_url> main` (or re-deploy with GitHub args).
 7. **Verify:** `curl http://<jencore_ip>:8600/health`, then `/start` and `/ping` in Jennifer’s Telegram bot.
@@ -345,22 +349,26 @@ When you add new features or do a significant deploy to a sub-agent (e.g. jencor
 
 ### Quick path
 
-1. **Set the node** (from this repo on MacBook):
-   ```bash
-   ./scripts/add_node.sh <node_name> <mini_ip> [mini_username]
-   ```
+- **Set the node** (from this repo on MacBook):
+
+```bash
+./scripts/add_node.sh <node_name> <mini_ip> [mini_username]
+```
+
    Example: `./scripts/add_node.sh kiera 192.168.1.50 kiera`  
    This updates `config/nodes.yaml` and prints the one-time Mini setup and deploy command.
 
-2. **On the Mini (one-time):** Same as jencore: Remote Login ON, install Homebrew, add your MacBook SSH key to `~/.ssh/authorized_keys`.
+- **On the Mini (one-time):** Same as jencore: Remote Login ON, install Homebrew, add your MacBook SSH key to `~/.ssh/authorized_keys`.
 
-3. **Deploy from MacBook:**
-   ```bash
-   ./scripts/deploy.sh <node_name> <mini_ip> <mini_username>
-   ```
+- **Deploy from MacBook:**
+
+```bash
+./scripts/deploy.sh <node_name> <mini_ip> <mini_username>
+```
+
    (Or use the exact command printed by `add_node.sh`.)
 
-4. **Verify:** `curl http://<mini_ip>:8600/health` and Telegram `/start` if you added a bot.
+- **Verify:** `curl http://<mini_ip>:8600/health` and Telegram `/start` if you added a bot.
 
 Profiles for Kiera and Scarlet already exist in `config/profiles/`. No new repo or template needed.
 
@@ -387,6 +395,41 @@ jcore = Family Agent (Master); jencore, score, kcore = sub-agents. Each person's
 
 **One-time:** Ensure `secrets/interop_shared_key.txt` exists (a single shared secret for the family). Deploy copies it to each profile's secrets on every node you deploy. After that, agents can use `delegate_node_task` and `/interop/inbox` to communicate; only nodes with that key can join.
 
+### Hub-routed reliability mode
+
+If a sub-agent cannot directly reach another sub-agent, send with route-via-hub:
+
+```json
+{
+  "tool_name": "delegate_node_task",
+  "payload": {
+    "target_profile": "kiera",
+    "task_type": "skills_checkin",
+    "route_via": "hub",
+    "task_payload": {"question": "Any new skills today?"}
+  }
+}
+```
+
+`auto` mode tries direct first and falls back through jcore.
+
+### Skill transfer governance
+
+- Manifests: `~/agent_skills/manifest.yaml`
+- Bundle transfer: `tar.gz` + SHA256 checksum
+- Risky permissions (`screen`, `filesystem_write`, `network_external`, `secrets_access`) require explicit override approval.
+- Rate limit: max 1 successful new skill install per node per 24h unless override is approved.
+
+### Identity signing migration
+
+Profile config supports:
+
+- `interop_identity_mode: compat` (default)
+- `interop_identity_mode: provenance`
+- `interop_identity_mode: strict`
+
+When enabled, runtime generates per-node Ed25519 keys in profile secrets and adds identity signatures on envelopes while preserving shared-key compatibility.
+
 ## Master credentials (this repo)
 
 You keep **one copy of everyone’s credentials** in this repo so you can deploy any node from your MacBook. Runtime data stays isolated per user on each Mini; only the **master** secrets live here.
@@ -409,7 +452,7 @@ JENNIFER_OPENAI_API_KEY=...
 **Convention (one set per profile):**
 
 | File | Purpose |
-|------|--------|
+| --- | --- |
 | `secrets/<profile>.telegram.token` | Telegram bot token for that node |
 | `secrets/<profile>.telegram.pairing_code` | Pairing code for that bot |
 | `secrets/<profile>.llm_api_key` or `secrets/<profile>.openai_api_key` | OpenAI/LLM key (optional) |

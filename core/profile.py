@@ -16,6 +16,8 @@ class ProfilePaths:
     logs_dir: Path
     secrets_dir: Path
     sandbox_dir: Path
+    skills_dir: Path
+    skill_packages_dir: Path
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class Profile:
     llm_default_model: str
     public_readonly_mode: bool
     public_readonly_get_endpoints: list[str]
+    interop_identity_mode: str
     paths: ProfilePaths
 
 
@@ -75,6 +78,8 @@ def load_profile(profile_name: str, repo_root: Path | None = None) -> Profile:
         logs_dir=base_data_dir / "logs",
         secrets_dir=base_data_dir / "secrets",
         sandbox_dir=base_data_dir / "sandbox",
+        skills_dir=Path.home() / "agent_skills",
+        skill_packages_dir=base_data_dir / "skill_packages",
     )
 
     return Profile(
@@ -91,6 +96,7 @@ def load_profile(profile_name: str, repo_root: Path | None = None) -> Profile:
                 ["/health", "/status", "/api-usage", "/backup/status"],
             )
         ),
+        interop_identity_mode=str(raw.get("interop_identity_mode", "compat")).strip() or "compat",
         paths=paths,
     )
 
@@ -101,3 +107,5 @@ def ensure_profile_directories(profile: Profile) -> None:
     profile.paths.logs_dir.mkdir(parents=True, exist_ok=True)
     profile.paths.secrets_dir.mkdir(parents=True, exist_ok=True)
     profile.paths.sandbox_dir.mkdir(parents=True, exist_ok=True)
+    profile.paths.skills_dir.mkdir(parents=True, exist_ok=True)
+    profile.paths.skill_packages_dir.mkdir(parents=True, exist_ok=True)

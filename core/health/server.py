@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 import time
+from base64 import b64decode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +19,8 @@ from core.interop.bridge import InteropBridge
 from core.llm import complete as llm_complete
 from core.llm import read_secret
 from core.memory.episodic_memory import EpisodicMemoryStore
+from core.skills.manifest import SkillManifestManager, sha256_file
+from core.skills.package import extract_skill_bundle
 from core.tools.registry import ToolRegistry
 
 _DASHBOARD_HTML = """<!doctype html>
@@ -248,11 +252,12 @@ _DASHBOARD_HTML = """<!doctype html>
       const list = data.recent_messages.slice(0, 50).map(m => {
         const q = m.question ? ('<div class="muted">q: ' + esc(m.question) + '</div>') : '';
         const r = m.reply_message ? ('<div class="muted">reply: ' + esc(m.reply_message) + '</div>') : '';
+        const s = m.skill_id ? ('<div class="muted">skill: ' + esc(m.skill_id) + '@' + esc(m.skill_version || "n/a") + '</div>') : '';
         return (
           '<div class="feed-item">' +
             '<div><strong>' + esc(m.source_node || m.source_profile || "unknown") + '</strong> → <strong>' + esc(m.target_node || m.target_profile || "unknown") + '</strong></div>' +
             '<div class="muted">task=' + esc(m.task_type || "n/a") + ' | status=' + esc(m.status || "n/a") + '</div>' +
-            q + r +
+            q + r + s +
             '<div class="muted">' + esc(fmtTime(m.created_at_ts)) + '</div>' +
           '</div>'
         );
@@ -296,6 +301,8 @@ class HealthServer:
         interop_bridge: InteropBridge | None = None,
         public_readonly_mode: bool = False,
         public_readonly_get_endpoints: list[str] | None = None,
+        skills_dir: Path | None = None,
+        skill_packages_dir: Path | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -312,6 +319,8 @@ class HealthServer:
             public_readonly_get_endpoints
             or ["/health", "/status", "/api-usage", "/backup/status", "/dashboard", "/dashboard/data"]
         )
+        self._skills_dir = skills_dir or (Path.home() / "agent_skills")
+        self._skill_packages_dir = skill_packages_dir or (Path.home() / "agentdata" / profile_name / "skill_packages")
         self._started_at = time.time()
         self._thread: threading.Thread | None = None
         self._httpd: ThreadingHTTPServer | None = None
@@ -342,9 +351,12 @@ class HealthServer:
         interop_bridge = self._interop_bridge
         public_readonly_mode = self._public_readonly_mode
         public_readonly_get_endpoints = self._public_readonly_get_endpoints
+        skills_dir = self._skills_dir
+        skill_packages_dir = self._skill_packages_dir
         started_at = self._started_at
         default_health_port = self._port
         profile_secrets_dir = Path.home() / "agentdata" / profile_name / "secrets"
+        manifest_manager = SkillManifestManager(skills_dir / "manifest.yaml")
 
         def _fetch_json(host: str, path: str, timeout: float = 1.5) -> dict[str, Any] | None:
             if not host:
@@ -373,6 +385,112 @@ class HealthServer:
                 except (ValueError, OSError):
                     return None
             return None
+
+        def _is_hub_node() -> bool:
+            if interop_bridge is None:
+                return False
+            hub_profile = interop_bridge.hub_profile()
+            return bool(hub_profile and hub_profile == profile_name)
+
+        def _risky_permissions(permissions: list[str]) -> list[str]:
+            risky = {"screen", "filesystem_write", "network_external", "secrets_access"}
+            return [perm for perm in permissions if perm in risky]
+
+        def _rate_limited_install(override_approved: bool) -> bool:
+            if interop_bridge is None or override_approved:
+                return False
+            recent = interop_bridge.recent_successful_skill_installs(target_profile=profile_name, within_seconds=86400)
+            return recent >= 1
+
+        def _run_skill_tests(skill_root: Path) -> dict[str, Any]:
+            tests_py = skill_root / "tests.py"
+            if not tests_py.exists():
+                return {"ok": True, "note": "tests.py not provided"}
+            proc = subprocess.run(  # noqa: S603
+                ["python3", str(tests_py)],
+                cwd=str(skill_root),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=90,
+            )
+            return {
+                "ok": proc.returncode == 0,
+                "returncode": proc.returncode,
+                "stdout": proc.stdout[-4000:],
+                "stderr": proc.stderr[-4000:],
+            }
+
+        def _skills_manifest_delta_for(remote_skills: list[dict[str, Any]]) -> dict[str, Any]:
+            return manifest_manager.diff(remote_skills)
+
+        def _install_skill_bundle(payload: dict[str, Any], source_profile: str) -> dict[str, Any]:
+            skill_id = str(payload.get("skill_id", "")).strip()
+            version = str(payload.get("version", "")).strip()
+            checksum = str(payload.get("checksum", "")).strip()
+            bundle_b64 = str(payload.get("bundle_b64", "")).strip()
+            permissions_requested = payload.get("permissions_requested", [])
+            if not isinstance(permissions_requested, list):
+                permissions_requested = []
+            requested_permissions = [str(item).strip() for item in permissions_requested if str(item).strip()]
+            if not skill_id or not version or not checksum or not bundle_b64:
+                raise RuntimeError("skill_deliver requires skill_id, version, checksum, and bundle_b64")
+            override_approved = bool(payload.get("override_approved", False))
+            risky_perms = _risky_permissions(requested_permissions)
+            if risky_perms and not override_approved:
+                raise RuntimeError(f"Skill install requires approval for risky permissions: {', '.join(risky_perms)}")
+            if _rate_limited_install(override_approved):
+                raise RuntimeError("Rate limit reached: max 1 new skill/day for this agent unless override_approved=true")
+
+            skill_packages_dir.mkdir(parents=True, exist_ok=True)
+            skills_dir.mkdir(parents=True, exist_ok=True)
+            bundle_path = skill_packages_dir / f"{skill_id}-{version}.tar.gz"
+            bundle_path.write_bytes(b64decode(bundle_b64.encode("utf-8")))
+            actual_checksum = sha256_file(bundle_path)
+            if actual_checksum != checksum:
+                raise RuntimeError("Skill bundle checksum mismatch")
+            install_root = extract_skill_bundle(bundle_path=bundle_path, target_dir=skills_dir)
+            tests_result = _run_skill_tests(install_root)
+            if not tests_result.get("ok"):
+                raise RuntimeError(f"Skill tests failed: {tests_result.get('stderr') or tests_result.get('stdout') or 'unknown'}")
+
+            manifest_entry = {
+                "skill_id": skill_id,
+                "name": str(payload.get("name") or skill_id),
+                "version": version,
+                "description": str(payload.get("description") or ""),
+                "entrypoints": payload.get("entrypoints") if isinstance(payload.get("entrypoints"), list) else [],
+                "dependencies": payload.get("dependencies") if isinstance(payload.get("dependencies"), list) else [],
+                "permissions_requested": requested_permissions,
+                "checksum": checksum,
+                "signed_by": payload.get("signed_by") or source_profile,
+            }
+            manifest_manager.upsert(manifest_entry)
+            if interop_bridge is not None:
+                interop_bridge.record_skill_registry(
+                    profile_name=profile_name,
+                    skill_id=skill_id,
+                    version=version,
+                    checksum=checksum,
+                    manifest=manifest_entry,
+                    installed_from=source_profile,
+                )
+                interop_bridge.record_skill_install_event(
+                    profile_name=profile_name,
+                    skill_id=skill_id,
+                    version=version,
+                    status="ok",
+                    details={"source_profile": source_profile, "tests": tests_result},
+                )
+            return {
+                "kind": "skill_install_result",
+                "ok": True,
+                "skill_id": skill_id,
+                "version": version,
+                "checksum": checksum,
+                "installed_path": str(install_root),
+                "tests": tests_result,
+            }
 
         def _build_dashboard_data() -> dict[str, Any]:
             def _growth_stage(score: int) -> str:
@@ -495,6 +613,15 @@ class HealthServer:
                         )
                         if isinstance(msg.get("payload"), dict)
                         else None,
+                        "skill_id": (msg.get("payload") or {}).get("skill_id")
+                        if isinstance(msg.get("payload"), dict)
+                        else None,
+                        "skill_version": (msg.get("payload") or {}).get("version")
+                        if isinstance(msg.get("payload"), dict)
+                        else None,
+                        "skills_manifest_delta": (msg.get("payload") or {}).get("skills_manifest_delta")
+                        if isinstance(msg.get("payload"), dict)
+                        else None,
                         "created_at": msg.get("created_at"),
                         "created_at_ts": created_ts,
                     }
@@ -580,6 +707,10 @@ class HealthServer:
             model = read_secret(profile_secrets_dir, "llm_model.txt") or "gpt-4o-mini"
             tools = tool_registry.list_tools()
             question = str(payload.get("question") or "Do you have any cool new skills today?")
+            remote_manifest = payload.get("skills_manifest")
+            remote_skills = remote_manifest if isinstance(remote_manifest, list) else []
+            local_skills = manifest_manager.load()
+            manifest_delta = _skills_manifest_delta_for(remote_skills)
             recent = interop_bridge.recent_messages(limit=12) if interop_bridge is not None else []
             recent_lines: list[str] = []
             for item in recent:
@@ -604,6 +735,7 @@ class HealthServer:
                         f"Target agent: {profile_name}\n"
                         f"Question: {question}\n"
                         f"Current tools: {', '.join(tools)}\n"
+                        f"Current skills in manifest: {len(local_skills)}\n"
                         f"Recent interop activity:\n- " + ("\n- ".join(recent_lines) if recent_lines else "none")
                     ),
                 },
@@ -623,6 +755,8 @@ class HealthServer:
                     "message": text,
                     "tools_registered": tool_registry.count(),
                     "tools": tools,
+                    "skills_manifest": local_skills,
+                    "skills_manifest_delta": manifest_delta,
                     "usage": usage,
                 }
             except RuntimeError as exc:
@@ -632,6 +766,8 @@ class HealthServer:
                     "error": str(exc),
                     "tools_registered": tool_registry.count(),
                     "tools": tools,
+                    "skills_manifest": local_skills,
+                    "skills_manifest_delta": manifest_delta,
                 }
 
         class Handler(BaseHTTPRequestHandler):
@@ -806,11 +942,75 @@ class HealthServer:
                     try:
                         accepted = interop_bridge.receive_envelope(envelope)
                         response: dict[str, Any] = dict(accepted)
-                        if accepted.get("task_type") == "skills_checkin":
+                        task_type = str(accepted.get("task_type") or "")
+                        payload_obj = dict(accepted.get("payload") or {})
+                        if task_type == "skills_checkin":
                             response["reply"] = _llm_skills_checkin_reply(
                                 source_profile=str(accepted.get("source") or "unknown"),
-                                payload=dict(accepted.get("payload") or {}),
+                                payload=payload_obj,
                             )
+                        elif task_type == "route_envelope":
+                            if not _is_hub_node():
+                                raise RuntimeError("route_envelope is only accepted by hub node")
+                            inner_envelope = payload_obj.get("envelope")
+                            response["relay"] = interop_bridge.forward_relay_envelope(
+                                relayer_source=str(accepted.get("source") or ""),
+                                inner_envelope=inner_envelope if isinstance(inner_envelope, dict) else {},
+                            )
+                        elif task_type == "skill_request":
+                            if not _is_hub_node():
+                                raise RuntimeError("skill_request is only accepted by hub node")
+                            approval_id = approval_engine.enqueue(
+                                profile_name=profile_name,
+                                tool_name="skill_request",
+                                tier="interop_skill",
+                                payload=payload_obj,
+                            )
+                            response["skill_request"] = {
+                                "ok": True,
+                                "approval_required": True,
+                                "approval_id": approval_id,
+                                "status": "pending",
+                            }
+                        elif task_type == "skill_approve":
+                            if not _is_hub_node():
+                                raise RuntimeError("skill_approve is only accepted by hub node")
+                            approval_id = int(payload_obj.get("approval_id", 0) or 0)
+                            approved = bool(payload_obj.get("approved", False))
+                            if approval_id <= 0:
+                                raise RuntimeError("skill_approve requires approval_id")
+                            if not approval_engine.resolve(approval_id, approve=approved):
+                                raise RuntimeError("Unable to resolve approval_id")
+                            response["skill_approve"] = {"ok": True, "approval_id": approval_id, "approved": approved}
+                        elif task_type == "skill_deliver":
+                            source_profile = str(accepted.get("source") or "unknown")
+                            install_result = _install_skill_bundle(payload_obj, source_profile)
+                            response["skill_install_result"] = install_result
+                            if interop_bridge.hub_profile() and source_profile != interop_bridge.hub_profile():
+                                result_payload = {
+                                    "kind": "skill_install_result",
+                                    "origin_source": source_profile,
+                                    **install_result,
+                                }
+                                try:
+                                    response["hub_report"] = interop_bridge.send_task(
+                                        interop_bridge.hub_profile() or source_profile,
+                                        "skill_install_result",
+                                        result_payload,
+                                        route_via="auto",
+                                    )
+                                except RuntimeError as exc:
+                                    response["hub_report_error"] = str(exc)
+                        elif task_type == "skill_install_result":
+                            if interop_bridge is not None:
+                                interop_bridge.record_skill_install_event(
+                                    profile_name=str(payload_obj.get("target_profile") or accepted.get("target") or profile_name),
+                                    skill_id=str(payload_obj.get("skill_id") or ""),
+                                    version=str(payload_obj.get("version") or ""),
+                                    status="ok" if bool(payload_obj.get("ok")) else "failed",
+                                    details=payload_obj,
+                                )
+                            response["skill_install_recorded"] = True
                         episodic_memory.record(
                             "interop_message_received",
                             {"source": accepted["source"], "task_type": accepted["task_type"], "nonce": accepted["nonce"]},

@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
   "PyYAML>=6.0",
   "python-telegram-bot>=20.0",
+  "cryptography",
 ]
 
 [tool.setuptools]

@@ -124,6 +124,33 @@ class MemoryEngine:
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS skill_registry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_name TEXT NOT NULL,
+                skill_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                manifest_json TEXT NOT NULL,
+                installed_from TEXT,
+                installed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_skill_registry_profile_skill
+            ON skill_registry(profile_name, skill_id, installed_at DESC);
+
+            CREATE TABLE IF NOT EXISTS skill_install_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_name TEXT NOT NULL,
+                skill_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_skill_install_events_profile_created
+            ON skill_install_events(profile_name, created_at DESC);
             """
         )
         # Lightweight migrations for approval execution lifecycle.

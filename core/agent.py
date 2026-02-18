@@ -14,6 +14,7 @@ from core.backup_status import BackupStatusProvider
 from core.control_plane import ControlPlane
 from core.health.server import HealthServer
 from core.interop.bridge import InteropBridge
+from core.interop.identity import ensure_identity_keys
 from core.memory.engine import MemoryEngine
 from core.memory.episodic_memory import EpisodicMemoryStore
 from core.memory.profile_memory import ProfileMemoryStore
@@ -50,6 +51,11 @@ def main() -> int:
     runtime_repo_root = repo_root or Path(__file__).resolve().parent.parent
     profile = load_profile(args.profile, repo_root=repo_root)
     ensure_profile_directories(profile)
+    (profile.paths.secrets_dir / "interop_identity_mode.txt").write_text(
+        f"{profile.interop_identity_mode}\n",
+        encoding="utf-8",
+    )
+    ensure_identity_keys(profile.paths.secrets_dir)
 
     memory_engine = MemoryEngine(profile.paths.db_path)
     memory_engine.initialize()
@@ -117,6 +123,8 @@ def main() -> int:
         interop_bridge=interop_bridge,
         public_readonly_mode=profile.public_readonly_mode,
         public_readonly_get_endpoints=profile.public_readonly_get_endpoints,
+        skills_dir=profile.paths.skills_dir,
+        skill_packages_dir=profile.paths.skill_packages_dir,
     )
     health_server.start()
     running = True

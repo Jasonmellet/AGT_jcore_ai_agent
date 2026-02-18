@@ -57,3 +57,14 @@ class PolicyEngine:
             return PolicyResult(PolicyDecision.DENY, "Tier 2 is restricted to Jason Core")
 
         return PolicyResult(PolicyDecision.DENY, "Unknown tool tier")
+
+    def check_skill_permissions(self, permissions_requested: list[str]) -> PolicyResult:
+        risky = {"screen", "filesystem_write", "network_external", "secrets_access"}
+        requested = {perm for perm in permissions_requested if perm}
+        risky_found = sorted(requested.intersection(risky))
+        if not risky_found:
+            return PolicyResult(PolicyDecision.ALLOW, "No risky skill permissions requested")
+        return PolicyResult(
+            PolicyDecision.REQUIRE_APPROVAL,
+            f"Skill permissions require approval: {', '.join(risky_found)}",
+        )

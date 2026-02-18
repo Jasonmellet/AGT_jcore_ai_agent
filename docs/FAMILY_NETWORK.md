@@ -21,6 +21,16 @@
 - Only nodes with that key can create or accept interop messages. No key → no cross-node traffic (graceful).
 - **In practice:** One family key lives in this repo (e.g. `secrets/interop_shared_key.txt`); deploy copies it to each profile’s secrets on jcore, jencore, score, kcore. Then all four can use `delegate_node_task` (and any future interop features).
 
+## Hub-routed inbox (reliable cross-subnet transport)
+
+Because sub-agent to sub-agent LAN routes can fail across subnets, the network now supports hub routing:
+
+- `route_envelope` lets any node send an inner envelope to `jcore`.
+- `jcore` validates, audits, and forwards to the final target.
+- Result: full node-to-node reachability as long as each node can reach `jcore`.
+
+This keeps the transport simple and adds a single policy/audit choke point.
+
 ## Shared knowledge tunnel (today + later)
 
 - **Today:** The tunnel is **task delegation**: one agent sends a bounded task (e.g. “run this query”, “store this”) to another via `POST /interop/inbox` with a signed envelope. Perfect for “ask jcore to do X” or “broadcast to family”.
@@ -30,6 +40,33 @@
 
 - **Repo layout:** `skills/` in Family_Agent (e.g. `skills/communication/`, `skills/memory/`, `skills/builders/`, profile-specific under `skills/jennifer/` etc.). Core doesn’t auto-load yet; when it does, deploy can copy “family” skills to every node and profile-specific ones only where needed.
 - **Installing on another agent:** Copy the skill module (and any config) into the repo, add to that profile’s skill list or to the family set, deploy. “Minor edits” = small config or prompt per profile (e.g. name, preferences).
+
+## Skill transfer protocol (request -> approve -> deliver -> install -> verify)
+
+- **Manifest layer:** every node keeps `~/agent_skills/manifest.yaml` with machine-readable skills (`skill_id`, version, checksum, permissions, entrypoints, etc.).
+- **Discovery:** `skills_checkin` now returns both friendly text and `skills_manifest_delta`.
+- **Protocol task types:**
+  - `skill_request` (to hub)
+  - `skill_approve` (hub approval resolution)
+  - `skill_deliver` (bundle transfer + install)
+  - `skill_install_result` (installation report/audit)
+- **Package format:** `tar.gz` bundle with checksum verification before install.
+- **Install path:** `~/agent_skills/<skill_id>/...`.
+
+Guardrails:
+
+- Risky permissions (`screen`, `filesystem_write`, `network_external`, `secrets_access`) require approval/override.
+- Rate limit: max 1 successful new skill install per node per 24h unless explicit override.
+
+## Identity signing migration
+
+Interop remains backward compatible with shared-key HMAC, and now supports optional per-node Ed25519 signatures:
+
+- `compat`: HMAC only (default)
+- `provenance`: HMAC + verify identity signatures when present
+- `strict`: require valid identity signature
+
+Identity mode is controlled by profile config (`interop_identity_mode`) and runtime secret file (`interop_identity_mode.txt`).
 
 ## Summary
 
