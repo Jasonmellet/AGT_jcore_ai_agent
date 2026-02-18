@@ -26,11 +26,14 @@ from core.memory.profile_memory import ProfileMemoryStore
 from core.memory.transcript_memory import TranscriptMemoryStore
 from core.memory.vector_memory import VectorMemoryStore
 from core.profile import Profile
+from core.skills.manifest import SkillManifestManager
 
 CONVERSATION_MAX_TURNS = 10
 MAX_TELEGRAM_MESSAGE_LEN = 3900
 DEFAULT_CHAT_MODE = "chat"
 DEFAULT_LLM_TIMEOUT_SECONDS = 20
+MAX_CONTEXT_SKILLS = 8
+MAX_SKILL_DESCRIPTION_LEN = 180
 
 
 def _truncate(text: str) -> str:
@@ -316,6 +319,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("idea", self._cmd_idea))
         self._app.add_handler(CommandHandler("ideas", self._cmd_ideas))
         self._app.add_handler(CommandHandler("idea_search", self._cmd_idea_search))
+        self._app.add_handler(CommandHandler("skills", self._cmd_skills))
         self._app.add_handler(CommandHandler("whatsnew", self._cmd_whatsnew))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text)
@@ -367,7 +371,7 @@ class TelegramBot:
             return
         msg = (
             f"{self._profile.display_name} online.\n"
-            "Commands: /help, /ping, /status, /whoami, /health, /logs, /mode, /idea, /ideas, /idea_search"
+            "Commands: /help, /ping, /status, /whoami, /health, /logs, /mode, /idea, /ideas, /idea_search, /skills"
         )
         await self._reply_text(update, msg)
         self._record_in_db("telegram_command_handled", {"chat_id": update.effective_chat.id, "command": "start"}, decision="allow")
@@ -385,6 +389,7 @@ class TelegramBot:
             "/idea <text> - capture idea\n"
             "/ideas [N] - list latest ideas\n"
             "/idea_search <query> - semantic idea search\n"
+            "/skills - list installed skills from manifest\n"
             "/whatsnew - latest features and capabilities"
         )
         await self._reply_text(update, msg)
@@ -572,6 +577,27 @@ class TelegramBot:
         ]
         await self._reply_text(update, _truncate("\n".join(lines)))
 
+    def _installed_skills_summary_lines(self) -> list[str]:
+        manifest_path = self._profile.paths.skills_dir / "manifest.yaml"
+        skills = SkillManifestManager(manifest_path).load()
+        lines: list[str] = []
+        for skill in skills[:MAX_CONTEXT_SKILLS]:
+            skill_id = str(skill.get("skill_id", "")).strip() or "unknown_skill"
+            version = str(skill.get("version", "")).strip() or "unknown"
+            description = str(skill.get("description", "")).strip() or "no description"
+            lines.append(f"{skill_id} (v{version}): {description[:MAX_SKILL_DESCRIPTION_LEN]}")
+        return lines
+
+    async def _cmd_skills(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._guard(update, context):
+            return
+        lines = self._installed_skills_summary_lines()
+        if not lines:
+            await self._reply_text(update, "No installed skills in manifest yet.")
+        else:
+            await self._reply_text(update, _truncate("Installed skills:\n- " + "\n- ".join(lines)))
+        self._record_in_db("telegram_command_handled", {"chat_id": update.effective_chat.id, "command": "skills"}, decision="allow")
+
     async def _cmd_whatsnew(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._guard(update, context):
             return
@@ -697,6 +723,11 @@ class TelegramBot:
         if event_lines:
             sections.append("RecentEvents: " + " | ".join(event_lines))
         sections.append(f"ChatMode: {self._get_chat_mode(chat_id)}")
+        skill_lines = self._installed_skills_summary_lines()
+        if skill_lines:
+            sections.append("InstalledSkills:\n- " + "\n- ".join(skill_lines))
+        else:
+            sections.append("InstalledSkills: none")
         release_notes_path = self._profile.paths.base_data_dir / "release_notes_latest.txt"
         if release_notes_path.exists():
             try:
@@ -720,7 +751,10 @@ class TelegramBot:
             "Reply in first person, concisely and in a friendly tone. No markdown. "
             "Identify yourself when it fits the conversation. "
             "If API/backends are degraded, explain clearly in one line with a status marker. "
-            "Use LatestReleaseNotes in MemoryContext to answer questions about what's new, what you can do, or how to use features.\n"
+            "Use InstalledSkills in MemoryContext as the source of truth for skill-related questions. "
+            "If the user asks about a skill and the name is ambiguous or not in InstalledSkills, ask one short clarifying question instead of guessing. "
+            "If InstalledSkills is empty, say clearly that no new skills are installed yet. "
+            "Use LatestReleaseNotes in MemoryContext for what's new and feature guidance.\n"
             f"MemoryContext:\n{memory_context}"
         )
         conv = self._conversation(chat_id)

@@ -12,7 +12,7 @@ This document summarizes the ecosystem, infrastructure, and capabilities of the 
 | **jencore** | jennifer | Sub-agent   | (in nodes.yaml) / jennifer          | Jennifer’s personal agent. |
 | **score**   | scarlet  | Sub-agent   | 192.168.7.191 / scarletcore         | Scarlet’s agent. |
 | **kcore**   | kiera    | Sub-agent   | 192.168.4.140 / kieracore           | Kiera’s agent. |
-| **Pepper**  | (placeholder) | Placeholder | peppers-mac-mini.local / pepperpotts | No service on 8600 yet; shown on dashboard as placeholder. |
+| **Pepper**  | pepper | Sub-agent (skills workhorse) | peppers-mac-mini.local / pepperpotts | Deploy with pepper profile to connect; then health on 8600 and skills/interop available. |
 
 - **Single source of truth for nodes:** `config/nodes.yaml` (host, profile, user per node).
 - **Master vs sub-agents:** jcore is the Family Agent (Master); others are sub-agents. See `docs/FAMILY_NETWORK.md` for roles and secure tunnel.
@@ -79,7 +79,11 @@ This document summarizes the ecosystem, infrastructure, and capabilities of the 
 - **Health and dashboard:** Health server (8600), dashboard UI and JSON, growth stages and tunnel visualization.
 - **Family network:** Shared interop key, tunnel semantics, and optional hub mode described in `docs/FAMILY_NETWORK.md`.
 
-Capabilities are aligned across agents (same codebase); per-profile differences are config, secrets, and release notes. Pepper is a placeholder until a profile is deployed and a health endpoint exists.
+Capabilities are aligned across agents (same codebase); per-profile differences are config, secrets, and release notes.
+
+**Connecting Pepper:** Run deploy for the pepper profile to peppers-mac-mini.local (user pepperpotts). That installs the Family Agent there and opens port 8600, so the dashboard shows her as up and she can do skills check-ins and skill transfer. If Pepper already runs a different “workhorse” stack, you can either run this agent there too (same codebase, pepper profile) or add a small adapter on her host that exposes `/health` (and optionally `/interop/inbox`) so jcore can see her.
+
+**Canary skill and Kiera (kcore):** The canary test delivered the skill **to jennifer** (jencore). Kiera’s node (kcore) was used as the **sender** in that test (from the dev machine), so the skill was never installed **on** kcore—only on jencore. So “kcore didn’t know about the canary” is expected: kcore’s manifest and bot have no record of that skill. To have Kiera’s bot “have” that skill, deliver and install the same skill **to** kiera (e.g. `skill_deliver` targeting the kiera profile).
 
 ---
 

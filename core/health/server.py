@@ -711,6 +711,11 @@ class HealthServer:
             remote_skills = remote_manifest if isinstance(remote_manifest, list) else []
             local_skills = manifest_manager.load()
             manifest_delta = _skills_manifest_delta_for(remote_skills)
+            skill_summary_lines = [
+                f"- {s.get('skill_id', '')} (v{s.get('version', '')}): {str(s.get('description', '')).strip() or 'no description'}"
+                for s in local_skills
+            ]
+            skills_blob = "\n".join(skill_summary_lines) if skill_summary_lines else "none"
             recent = interop_bridge.recent_messages(limit=12) if interop_bridge is not None else []
             recent_lines: list[str] = []
             for item in recent:
@@ -724,6 +729,7 @@ class HealthServer:
                     "content": (
                         "You are an AI family agent responding to another agent. "
                         "Answer briefly and concretely. "
+                        "If you have installed skills listed below, mention them by name and what they do. "
                         "If there are no new skills, say so clearly. "
                         "If there are potentially useful capabilities, mention 1-3 with simple names."
                     ),
@@ -735,7 +741,7 @@ class HealthServer:
                         f"Target agent: {profile_name}\n"
                         f"Question: {question}\n"
                         f"Current tools: {', '.join(tools)}\n"
-                        f"Current skills in manifest: {len(local_skills)}\n"
+                        f"Installed skills (from manifest):\n{skills_blob}\n"
                         f"Recent interop activity:\n- " + ("\n- ".join(recent_lines) if recent_lines else "none")
                     ),
                 },
