@@ -21,6 +21,7 @@ from core.llm import read_secret
 from core.memory.episodic_memory import EpisodicMemoryStore
 from core.skills.manifest import SkillManifestManager, sha256_file
 from core.skills.package import extract_skill_bundle
+from core.soul import get_soul_content
 from core.tools.registry import ToolRegistry
 
 _DASHBOARD_HTML = """<!doctype html>
@@ -303,10 +304,12 @@ class HealthServer:
         public_readonly_get_endpoints: list[str] | None = None,
         skills_dir: Path | None = None,
         skill_packages_dir: Path | None = None,
+        repo_root: Path | None = None,
     ) -> None:
         self._host = host
         self._port = port
         self._profile_name = profile_name
+        self._repo_root = repo_root
         self._tool_registry = tool_registry
         self._approval_engine = approval_engine
         self._episodic_memory = episodic_memory
@@ -355,6 +358,7 @@ class HealthServer:
         skill_packages_dir = self._skill_packages_dir
         started_at = self._started_at
         default_health_port = self._port
+        repo_root = self._repo_root
         profile_secrets_dir = Path.home() / "agentdata" / profile_name / "secrets"
         manifest_manager = SkillManifestManager(skills_dir / "manifest.yaml")
 
@@ -723,17 +727,18 @@ class HealthServer:
                     f"{item.get('direction')} {item.get('source_node')}->{item.get('target_node')} "
                     f"task={item.get('task_type')} status={item.get('status')}"
                 )
+            system_content = (
+                "You are an AI family agent responding to another agent. "
+                "Answer briefly and concretely. "
+                "If you have installed skills listed below, mention them by name and what they do. "
+                "If there are no new skills, say so clearly. "
+                "If there are potentially useful capabilities, mention 1-3 with simple names."
+            )
+            soul = get_soul_content(profile_name, repo_root) if repo_root else ""
+            if soul:
+                system_content += f"\n\nIdentity and how you interact:\n{soul}"
             messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an AI family agent responding to another agent. "
-                        "Answer briefly and concretely. "
-                        "If you have installed skills listed below, mention them by name and what they do. "
-                        "If there are no new skills, say so clearly. "
-                        "If there are potentially useful capabilities, mention 1-3 with simple names."
-                    ),
-                },
+                {"role": "system", "content": system_content},
                 {
                     "role": "user",
                     "content": (

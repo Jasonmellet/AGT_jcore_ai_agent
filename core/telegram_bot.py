@@ -27,6 +27,7 @@ from core.memory.transcript_memory import TranscriptMemoryStore
 from core.memory.vector_memory import VectorMemoryStore
 from core.profile import Profile
 from core.skills.manifest import SkillManifestManager
+from core.soul import get_soul_content
 
 CONVERSATION_MAX_TURNS = 10
 MAX_TELEGRAM_MESSAGE_LEN = 3900
@@ -745,18 +746,21 @@ class TelegramBot:
 
     def _llm_reply(self, chat_id: int, user_text: str) -> str:
         memory_context = self._build_memory_context(chat_id)
-        system = (
-            f"You are {self._profile.display_name}, the voice of this family agent. "
-            f"You are a helpful, warm assistant for this household (profile={self._profile.name}). "
-            "Reply in first person, concisely and in a friendly tone. No markdown. "
-            "Identify yourself when it fits the conversation. "
-            "If API/backends are degraded, explain clearly in one line with a status marker. "
-            "Use InstalledSkills in MemoryContext as the source of truth for skill-related questions. "
-            "If the user asks about a skill and the name is ambiguous or not in InstalledSkills, ask one short clarifying question instead of guessing. "
-            "If InstalledSkills is empty, say clearly that no new skills are installed yet. "
-            "Use LatestReleaseNotes in MemoryContext for what's new and feature guidance.\n"
-            f"MemoryContext:\n{memory_context}"
-        )
+        soul = get_soul_content(self._profile.name)
+        system_parts = [
+            f"You are {self._profile.display_name}, the voice of this family agent. ",
+            "Reply in first person, concisely and in a friendly tone. No markdown. ",
+            "Identify yourself when it fits the conversation. ",
+            "If API/backends are degraded, explain clearly in one line with a status marker. ",
+            "Use InstalledSkills in MemoryContext as the source of truth for skill-related questions. ",
+            "If the user asks about a skill and the name is ambiguous or not in InstalledSkills, ask one short clarifying question instead of guessing. ",
+            "If InstalledSkills is empty, say clearly that no new skills are installed yet. ",
+            "Use LatestReleaseNotes in MemoryContext for what's new and feature guidance.",
+        ]
+        if soul:
+            system_parts.append(f"\n\nIdentity and how you interact (follow this):\n{soul}")
+        system_parts.append(f"\n\nMemoryContext:\n{memory_context}")
+        system = "".join(system_parts)
         conv = self._conversation(chat_id)
         messages: list[dict[str, str]] = [{"role": "system", "content": system}]
         for msg in conv:

@@ -25,6 +25,7 @@ This document summarizes the ecosystem, infrastructure, and capabilities of the 
 - **Backup:** GitHub backup repos (e.g. AGT_score_ai_agent, AGT_kcore_ai_agent). `scripts/backup_code.sh` and `scripts/backup_data.sh`; `scripts/install_backup_cron.sh` installs cron on each Mini. Deploy can wire a profile’s backup repo when the URL is passed.
 - **Secrets (repo):** Per-profile: `secrets/<profile>.telegram.token`, `secrets/<profile>.telegram.pairing_code`, `secrets/<profile>.openai_api_key` (or `.llm_api_key`). Shared: `secrets/interop_shared_key.txt`, `secrets/deploy_key` (+ `.pub`). Optional: `secrets/<profile>.telegram_chat_id` for notify.
 - **Profiles:** `config/profiles/<name>.yaml`; each node runs one profile (same codebase, different config and secrets).
+- **Soul and protocol:** `config/souls/family_protocol.md` (shared) and `config/souls/<profile>.md` (per-agent identity and how they interact with the family and other agents). Injected into Telegram and skills_checkin LLM system prompts.
 
 ---
 
@@ -36,8 +37,9 @@ This document summarizes the ecosystem, infrastructure, and capabilities of the 
 - **Hub-routed reliability:** `route_envelope` lets sub-agents relay through jcore. Sender -> jcore -> target gives reliable connectivity even when sub↔sub LAN routes are broken.
 - **Daily skills check-in (LLM-to-LLM):**  
   - At most once per 24h per target. Sender asks “do you have any cool new skills?”  
-  - Receiver (`core/health/server.py`) handles `task_type == "skills_checkin"` by calling an LLM with the receiving profile’s API key (system + user prompt: source, question, current tools, recent interop).  
-  - Reply is LLM-generated text (and tools/usage); stored in outbox payload and shown in dashboard “Recent Communication” feed.
+  - Receiver (`core/health/server.py`) handles `task_type == "skills_checkin"` by calling an LLM with the **target** profile’s API key (system + user prompt: source, question, current tools, recent interop).  
+  - Reply is LLM-generated text (and tools/usage); stored in outbox payload and shown in dashboard “Recent Communication” feed.  
+  - **Hub (jcore) needs an LLM key:** For check-ins **to** jcore (e.g. Pepper → jcore), jcore must have `~/agentdata/jason/secrets/llm_api_key.txt` (or `openai_api_key.txt`). Add `secrets/jason.openai_api_key` in this repo, then either run `scripts/push_llm_key_to_node.sh jason 192.168.7.10 jcore` or a full deploy (`scripts/deploy.sh jason 192.168.7.10 jcore`); deploy reads that file when no key arg is passed.
 - **Scheduler:** In `core/agent.py`, after health server start, a daemon thread runs the daily check-in loop (e.g. every 3600s, bridge sends check-ins per interval).  
 - **Note:** Only jcore↔sub-agent links are consistently reliable; sub-agent↔sub-agent can fail (e.g. routing between 192.168.7.x and 192.168.4.x). Hub mode (only jcore initiates check-ins) is an option.
 - **Security migration:** Shared-key HMAC remains active; optional per-node Ed25519 identity signatures support provenance and strict modes.
@@ -93,7 +95,9 @@ Capabilities are aligned across agents (same codebase); per-profile differences 
 |----------------|------|
 | Node list      | `config/nodes.yaml` |
 | Profiles       | `config/profiles/<name>.yaml` |
+| Soul + protocol | `config/souls/family_protocol.md`, `config/souls/<profile>.md` |
 | Deploy         | `scripts/deploy.sh` |
+| Push LLM key to node | `scripts/push_llm_key_to_node.sh` |
 | Notify user    | `scripts/notify_agent_user.sh` |
 | Install SSH key| `scripts/install_deploy_key.sh` |
 | Backup         | `scripts/backup_code.sh`, `scripts/backup_data.sh`, `scripts/install_backup_cron.sh` |

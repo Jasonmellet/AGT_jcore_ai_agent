@@ -23,6 +23,16 @@ GITHUB_REPO_BRANCH_VALUE="${8:-${GITHUB_REPO_BRANCH:-main}}"
 TARGET="$USER_NAME@$HOST"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# If no LLM key passed, try profile-specific file (same as deploy_all.sh)
+if [[ -z "$LLM_API_KEY_VALUE" ]]; then
+  for f in "$REPO_ROOT/secrets/$PROFILE.llm_api_key" "$REPO_ROOT/secrets/$PROFILE.openai_api_key"; do
+    if [[ -f "$f" ]]; then
+      LLM_API_KEY_VALUE="$(tr -d '\r\n' < "$f")"
+      break
+    fi
+  done
+fi
+
 # Prefer deploy key for automation; fall back to default SSH identities if needed.
 BASE_SSH_OPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new)
 SSH_OPTS=("${BASE_SSH_OPTS[@]}")

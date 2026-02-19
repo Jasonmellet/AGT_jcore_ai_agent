@@ -122,6 +122,7 @@ def main() -> int:
         control_plane=control_plane,
         interop_bridge=interop_bridge,
         public_readonly_mode=profile.public_readonly_mode,
+        repo_root=runtime_repo_root,
         public_readonly_get_endpoints=profile.public_readonly_get_endpoints,
         skills_dir=profile.paths.skills_dir,
         skill_packages_dir=profile.paths.skill_packages_dir,

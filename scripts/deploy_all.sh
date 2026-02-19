@@ -5,6 +5,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODES_FILE="$REPO_ROOT/config/nodes.yaml"
 DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy.sh"
 LOCAL_SECRETS_DIR="$REPO_ROOT/secrets"
+PYTHON="${REPO_ROOT}/.venv/bin/python3"
+[[ ! -x "$PYTHON" ]] && PYTHON=python3
 [[ -f "$REPO_ROOT/.env" ]] && set -a && source "$REPO_ROOT/.env" && set +a
 
 if [[ ! -f "$NODES_FILE" ]]; then
@@ -18,6 +20,28 @@ fi
 
 successes=()
 failures=()
+
+NODES_LIST="$(mktemp)"
+trap 'rm -f "$NODES_LIST"' EXIT
+"$PYTHON" - "$NODES_FILE" <<'PY' > "$NODES_LIST"
+import os
+import sys
+from pathlib import Path
+
+import yaml
+
+nodes_path = Path(sys.argv[1])
+raw = yaml.safe_load(nodes_path.read_text(encoding="utf-8")) or {}
+nodes = raw.get("nodes", {})
+
+for _, spec in nodes.items():
+    profile = str(spec.get("profile", "")).strip()
+    host = str(spec.get("host", "")).strip()
+    user_name = str(spec.get("user", os.environ.get("USER", ""))).strip()
+    if not profile or not host or host.endswith(".TBD"):
+        continue
+    print(f"{profile}|{host}|{user_name}")
+PY
 
 while IFS='|' read -r profile host user_name; do
   [[ -z "${profile}" ]] && continue
@@ -41,42 +65,23 @@ while IFS='|' read -r profile host user_name; do
     [[ -z "$llm_key_value" && -f "$openai_key_file" ]] && llm_key_value="$(tr -d '\r\n' < "$openai_key_file")"
   fi
 
-  if "$DEPLOY_SCRIPT" "$profile" "$host" "$user_name" "$token_value" "$pairing_value" "$llm_key_value"; then
+  if "$DEPLOY_SCRIPT" "$profile" "$host" "$user_name" "$token_value" "$pairing_value" "$llm_key_value" < /dev/null; then
     echo "SUCCESS: $profile@$host"
     successes+=("$profile@$host")
   else
     echo "FAILURE: $profile@$host"
     failures+=("$profile@$host")
   fi
-done < <(python3 - "$NODES_FILE" <<'PY'
-import os
-import sys
-from pathlib import Path
-
-import yaml
-
-nodes_path = Path(sys.argv[1])
-raw = yaml.safe_load(nodes_path.read_text(encoding="utf-8")) or {}
-nodes = raw.get("nodes", {})
-
-for _, spec in nodes.items():
-    profile = str(spec.get("profile", "")).strip()
-    host = str(spec.get("host", "")).strip()
-    user_name = str(spec.get("user", os.environ.get("USER", ""))).strip()
-    if not profile or not host or host.endswith(".TBD"):
-        continue
-    print(f"{profile}|{host}|{user_name}")
-PY
-)
+done < "$NODES_LIST"
 
 echo ""
 echo "Deployment summary:"
 echo "  Successful: ${#successes[@]}"
-for s in "${successes[@]}"; do
+for s in "${successes[@]+"${successes[@]}"}"; do
   echo "    - $s"
 done
 echo "  Failed: ${#failures[@]}"
-for f in "${failures[@]}"; do
+for f in "${failures[@]+"${failures[@]}"}"; do
   echo "    - $f"
 done
 
